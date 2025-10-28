@@ -1,0 +1,2084 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Study Hub (Local)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family/Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/showdown@2.1.0/dist/showdown.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            transition: background-image 0.5s ease-in-out, background-color 0.5s ease-in-out;
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed; /* Helps with full-screen coverage */
+        }
+        /* New class to ensure full-screen background on timer */
+        body.timer-active-body {
+            height: 100vh;
+            overflow: hidden;
+        }
+        .perspective-container {
+            perspective: 1000px;
+        }
+        .flashcard-inner {
+            transition: transform 0.6s;
+            transform-style: preserve-3d;
+        }
+        .flashcard.flipped .flashcard-inner {
+            transform: rotateY(180deg);
+        }
+        .flashcard-front, .flashcard-back {
+            -webkit-backface-visibility: hidden;
+            backface-visibility: hidden;
+        }
+        .flashcard-back {
+            transform: rotateY(180deg);
+        }
+        .prose img { max-width: 100%; height: auto; border-radius: 0.5rem; margin-top: 1rem; margin-bottom: 1rem; }
+        .prose pre { padding: 1rem; border-radius: 0.5rem; }
+        .prose code { font-family: 'Courier New', Courier, monospace; }
+        .dark .prose { color: #d1d5db; }
+        .dark .prose pre { background-color: #1f2937; }
+
+        .timer-view-fullscreen {
+            position: fixed;
+            inset: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-color: rgba(0,0,0,0.5); /* Semi-transparent overlay for text readability */
+        }
+
+        .glass-card {
+             background: rgba(0, 0, 0, 0.25);
+             backdrop-filter: blur(15px);
+             -webkit-backdrop-filter: blur(15px);
+             border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in {
+            animation: fadeIn 0.3s ease-out forwards;
+        }
+        .achievement-badge {
+            transition: all 0.3s ease;
+        }
+        .achievement-badge.locked {
+            filter: grayscale(100%);
+            opacity: 0.5;
+        }
+        .markdown-btn {
+            font-family: 'Inter', sans-serif;
+            font-weight: 600;
+            padding: 0.25rem 0.75rem;
+            border-radius: 0.375rem;
+            background-color: #475569; /* slate-600 */
+            color: #cbd5e1; /* slate-300 */
+            transition: background-color 0.2s ease-in-out;
+        }
+        .markdown-btn:hover {
+            background-color: #64748b; /* slate-500 */
+        }
+        /* Toggle Switch */
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 28px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #4b5563;
+            transition: .4s;
+            border-radius: 28px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 20px;
+            width: 20px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider {
+            background-color: #4f46e5;
+        }
+        input:checked + .slider:before {
+            transform: translateX(22px);
+        }
+        .quiz-option.correct { background-color: #10b981 !important; }
+        .quiz-option.incorrect { background-color: #ef4444 !important; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="antialiased text-slate-200">
+    <!-- App Container -->
+    <div id="app" class="max-w-5xl mx-auto p-4 sm:p-6 lg:p-8 relative z-10">
+        <header id="app-header" class="text-center mb-8 relative">
+            <h1 class="text-3xl sm:text-4xl font-bold text-white">Study Hub</h1>
+            <p class="text-slate-400 mt-2">Your all-in-one space for focused learning.</p>
+        </header>
+
+        <!-- Tabs -->
+        <div id="app-tabs" class="mb-8">
+            <div class="border-b border-slate-700">
+                <nav class="-mb-px flex space-x-4 sm:space-x-6 overflow-x-auto pb-2 hide-scrollbar" aria-label="Tabs">
+                    <button id="tab-dashboard" class="tab-btn whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm border-indigo-500 text-indigo-400">Dashboard</button>
+                    <button id="tab-decks" class="tab-btn whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-500">Flashcard Decks</button>
+                    <button id="tab-notes" class="tab-btn whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-500">Notes</button>
+                    <button id="tab-quiz" class="tab-btn whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-500">Quiz</button>
+                    <button id="tab-timer" class="tab-btn whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-500">Study Timer</button>
+                </nav>
+            </div>
+        </div>
+
+        <!-- Main Content Area -->
+        <main id="content-area">
+             <!-- Dashboard View -->
+            <div id="dashboard-view" class="view"></div>
+            <!-- Decks View -->
+            <div id="decks-view" class="view hidden"></div>
+            <!-- Flashcard Study View -->
+            <div id="flashcard-view" class="view hidden"></div>
+            <!-- Notes View -->
+            <div id="notes-view" class="view hidden"></div>
+            <!-- Quiz View -->
+            <div id="quiz-view" class="view hidden"></div>
+            <!-- Quiz Session View -->
+            <div id="quiz-session-view" class="view hidden"></div>
+        </main>
+    </div>
+    
+    <!-- Timer View (now outside the main app container for full-screen) -->
+    <div id="timer-view" class="view hidden"></div>
+    <input type="file" id="background-upload-input" class="hidden" accept="image/*">
+    <input type="file" id="sound-upload-input" class="hidden" accept="audio/*">
+
+
+    <!-- Timer Settings Modal -->
+    <div id="timer-settings-modal" class="fixed inset-0 bg-black bg-opacity-70 overflow-y-auto h-full w-full hidden z-[110]">
+        <div class="relative top-10 mx-auto p-6 border w-full max-w-2xl shadow-lg rounded-md bg-slate-800 border-slate-700">
+            <div class="flex justify-between items-center mb-4">
+                 <h3 class="text-xl leading-6 font-medium text-white">Timer Settings</h3>
+                 <button id="close-settings-modal-btn" class="text-slate-400 hover:text-white">&times;</button>
+            </div>
+            <div class="space-y-6">
+                <!-- Durations -->
+                <div>
+                    <h4 class="font-semibold text-slate-300 mb-2">Durations (minutes)</h4>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div>
+                            <label for="settings-pomodoro-duration" class="block text-sm text-slate-400 mb-1">Pomodoro</label>
+                            <input type="number" id="settings-pomodoro-duration" min="10" max="1440" class="w-full p-2 bg-slate-700 rounded-md border border-slate-600">
+                        </div>
+                        <div>
+                            <label for="settings-short-break-duration" class="block text-sm text-slate-400 mb-1">Short Break</label>
+                            <input type="number" id="settings-short-break-duration" min="1" max="1440" class="w-full p-2 bg-slate-700 rounded-md border border-slate-600">
+                        </div>
+                        <div>
+                            <label for="settings-long-break-duration" class="block text-sm text-slate-400 mb-1">Long Break</label>
+                            <input type="number" id="settings-long-break-duration" min="1" max="1440" class="w-full p-2 bg-slate-700 rounded-md border border-slate-600">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sounds -->
+                <div>
+                    <h4 class="font-semibold text-slate-300 mb-2">Completion Sound</h4>
+                    <div class="flex flex-wrap gap-2" id="sound-options">
+                        <button data-sound="default" class="sound-option-btn settings-btn">Default</button>
+                        <button data-sound="noise" class="sound-option-btn settings-btn">Noise</button>
+                        <button data-sound="rain" class="sound-option-btn settings-btn">Rain</button>
+                        <button data-sound="cafe" class="sound-option-btn settings-btn">Café</button>
+                        <button data-sound="custom" class="sound-option-btn settings-btn">Custom</button>
+                    </div>
+                     <div class="mt-2 text-sm text-slate-400">
+                         Custom: <span id="custom-sound-name">None</span>
+                         <button id="upload-sound-btn" class="ml-2 text-indigo-400 hover:underline">Upload</button>
+                    </div>
+                </div>
+
+                <!-- Background -->
+                 <div>
+                    <h4 class="font-semibold text-slate-300 mb-2">Timer Background</h4>
+                    <div class="flex gap-2">
+                        <button id="modal-upload-background-btn" class="settings-btn flex-grow">Upload Image</button>
+                         <button id="modal-remove-background-btn" class="settings-btn bg-red-800/50 hover:bg-red-800/80">Remove Custom</button>
+                    </div>
+                </div>
+
+                <!-- Auto Start -->
+                 <div>
+                    <div class="flex justify-between items-center">
+                        <h4 class="font-semibold text-slate-300">Auto-start next session?</h4>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="auto-start-toggle">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="text-right mt-6">
+                    <button id="save-settings-btn" class="px-5 py-2 bg-indigo-600 text-white font-medium rounded-lg shadow-sm hover:bg-indigo-700">Save & Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Modal for editing notes -->
+    <div id="note-modal" class="fixed inset-0 bg-black bg-opacity-70 overflow-y-auto h-full w-full hidden z-50">
+        <div class="relative top-10 mx-auto p-5 border w-full max-w-3xl shadow-lg rounded-md bg-slate-800 border-slate-700">
+            <div class="mt-3">
+                <h3 class="text-lg leading-6 font-medium text-white mb-4" id="note-modal-title">Create Note</h3>
+                <input type="hidden" id="note-id-input">
+                <input type="text" id="note-title-input" placeholder="Note Title" class="w-full px-3 py-2 text-slate-200 bg-slate-700 border border-slate-600 rounded-lg focus:outline-none mb-4">
+                
+                <div class="flex items-center space-x-2 mb-4">
+                    <button id="summarize-note-btn" type="button" class="text-sm px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded-md transition-colors">✨ Summarize</button>
+                    <button id="expand-note-btn" type="button" class="text-sm px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded-md transition-colors">✨ Expand</button>
+                </div>
+
+                <!-- Markdown Toolbar -->
+                <div id="markdown-toolbar" class="flex items-center space-x-1 p-2 bg-slate-900/50 rounded-t-lg border-b border-slate-600">
+                    <button type="button" data-action="bold" class="markdown-btn" title="Bold"><b>B</b></button>
+                    <button type="button" data-action="italic" class="markdown-btn" title="Italic"><i>I</i></button>
+                    <button type="button" data-action="h1" class="markdown-btn" title="Heading 1">H1</button>
+                    <button type="button" data-action="h2" class="markdown-btn" title="Heading 2">H2</button>
+                    <button type="button" data-action="code" class="markdown-btn" title="Code Block">&lt;/&gt;</button>
+                    <button type="button" data-action="link" class="markdown-btn" title="Link">🔗</button>
+                </div>
+                <textarea id="note-content-input" placeholder="Start writing your note... (Markdown supported)" rows="12" class="w-full px-3 py-2 text-slate-200 bg-slate-700 border border-slate-600 rounded-b-lg focus:outline-none"></textarea>
+                
+                <input type="text" id="note-tags-input" placeholder="Tags (comma-separated, e.g., science, biology)" class="w-full mt-4 px-3 py-2 text-slate-200 bg-slate-700 border border-slate-600 rounded-lg focus:outline-none">
+                <div id="note-modal-error" class="text-red-500 text-sm mt-2 hidden"></div>
+                
+                <div class="flex flex-col sm:flex-row justify-between items-center gap-4 px-1 py-3">
+                    <div>
+                        <button id="save-note-btn" class="px-4 py-2 bg-indigo-500 text-white text-base font-medium rounded-md w-auto shadow-sm hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500">Save Note</button>
+                        <button id="close-modal-btn" class="px-4 py-2 bg-slate-600 text-slate-200 text-base font-medium rounded-md w-auto shadow-sm hover:bg-slate-500 focus:outline-none ml-2">Cancel</button>
+                    </div>
+                     <div>
+                        <button id="export-md-btn" class="px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-md w-auto shadow-sm hover:bg-teal-700 focus:outline-none">Export as MD</button>
+                        <button id="export-pdf-btn" class="px-4 py-2 bg-rose-600 text-white text-sm font-medium rounded-md w-auto shadow-sm hover:bg-rose-700 focus:outline-none ml-2">Export as PDF</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden file input for deck imports -->
+    <input type="file" id="deck-file-input" class="hidden" accept=".json,.csv">
+
+    <script type="module">
+        const { jsPDF } = window.jspdf;
+        
+        // --- App State ---
+        let currentTab = 'dashboard';
+        let currentDeckId = null;
+        let currentDeckName = '';
+        let cards = [];
+        let reviewCards = [];
+        let allDecks = [], allNotes = [], allStudyLogs = [];
+        let userStats = {};
+        let deckSearchTerm = '', noteSearchTerm = '';
+        let deckTagFilter = null, noteTagFilter = null;
+        let newCardFiles = { frontImage: null, frontAudio: null, backImage: null, backAudio: null };
+        let previewAudio;
+        let previewAudioContext;
+
+        let currentQuizState = {
+            isActive: false,
+            deckId: null,
+            questions: [],
+            currentQuestionIndex: 0,
+            score: 0
+        };
+
+        const markdownConverter = new showdown.Converter();
+
+        // --- UI Elements ---
+        const appContainer = document.getElementById('app');
+        const contentArea = document.getElementById('content-area');
+        const views = {
+            dashboard: document.getElementById('dashboard-view'),
+            decks: document.getElementById('decks-view'),
+            flashcards: document.getElementById('flashcard-view'),
+            notes: document.getElementById('notes-view'),
+            quiz: document.getElementById('quiz-view'),
+            quizSession: document.getElementById('quiz-session-view'),
+            timer: document.getElementById('timer-view')
+        };
+        const tabs = {
+            dashboard: document.getElementById('tab-dashboard'),
+            decks: document.getElementById('tab-decks'),
+            notes: document.getElementById('tab-notes'),
+            quiz: document.getElementById('tab-quiz'),
+            timer: document.getElementById('tab-timer')
+        };
+        const noteModal = document.getElementById('note-modal');
+        const timerSettingsModal = document.getElementById('timer-settings-modal');
+
+        // --- Timer State ---
+        let timerInterval;
+        let clockInterval;
+        let timerState = 'stopped'; // stopped, running, paused
+        let timerMode = 'pomodoro'; // pomodoro, short, long
+        let timeLeft;
+        let timerDurations = {}; // Will be populated from userStats
+        let audioContext, soundSource, isSoundPlaying = false;
+        let currentSoundPreset = 'noise'; // Default preset for focus sounds
+        const defaultBackground = `url('https://images.unsplash.com/photo-1473773508845-188df298d2d1?q=80&w=1920&auto=format&fit=crop')`;
+
+        // --- Local Storage Logic ---
+        function saveStateToLocalStorage() {
+            const appState = {
+                allDecks,
+                allNotes,
+                allStudyLogs,
+                userStats
+            };
+            localStorage.setItem('studyHubData', JSON.stringify(appState));
+        }
+
+        function loadStateFromLocalStorage() {
+            const savedState = localStorage.getItem('studyHubData');
+            if (savedState) {
+                const parsedState = JSON.parse(savedState);
+                allDecks = parsedState.allDecks || [];
+                allNotes = parsedState.allNotes || [];
+                allStudyLogs = parsedState.allStudyLogs || [];
+                userStats = parsedState.userStats || {};
+            }
+             // Set defaults if they don't exist
+            const defaultStats = {
+                currentStreak: 0, longestStreak: 0, lastStudyDay: null, totalPomodoroSessions: 0, totalCardsReviewed: 0, achievements: {},
+                customPomodoroDuration: 25, customShortBreakDuration: 5, customLongBreakDuration: 15,
+                timerAutoStart: false, timerSound: 'default', customTimerSoundURL: null, customBackgroundURL: null, customTimerSoundName: null
+            };
+            userStats = { ...defaultStats, ...userStats };
+        }
+
+        // --- Initialization ---
+        function initialize() {
+            loadStateFromLocalStorage();
+            updateTimerDurationsFromStats();
+            setupListeners();
+            render();
+        }
+        
+        // --- Setup Event Listeners ---
+        function setupListeners() {
+            Object.keys(tabs).forEach(tabKey => {
+                tabs[tabKey].addEventListener('click', () => switchTab(tabKey));
+            });
+
+            document.body.addEventListener('click', handleBodyClick);
+            document.body.addEventListener('submit', handleBodySubmit);
+            document.body.addEventListener('input', handleBodyInput);
+            document.body.addEventListener('change', handleBodyChange);
+            document.body.addEventListener('mouseover', handleBodyMouseOver);
+            document.body.addEventListener('mouseout', handleBodyMouseOut);
+            document.body.addEventListener('mousemove', handleBodyMouseMove);
+            
+            document.getElementById('deck-file-input').addEventListener('change', handleFileUpload);
+            document.getElementById('background-upload-input').addEventListener('change', handleBackgroundImageUpload);
+            document.getElementById('sound-upload-input').addEventListener('change', handleCustomSoundUpload);
+            document.getElementById('close-modal-btn').addEventListener('click', closeNoteModal);
+            document.getElementById('save-note-btn').addEventListener('click', handleSaveNote);
+        }
+
+        // --- Event Handlers ---
+        function handleBodyClick(e) {
+            // Deck interactions
+            if (e.target.closest('.deck-card')) {
+                const deckCard = e.target.closest('.deck-card');
+                currentDeckId = deckCard.dataset.id;
+                currentDeckName = deckCard.dataset.name;
+                openDeck();
+            }
+            if (e.target.closest('.delete-deck-btn')) {
+                e.stopPropagation();
+                const deckId = e.target.closest('.delete-deck-btn').dataset.id;
+                deleteDeck(deckId);
+            }
+            if (e.target.id === 'import-deck-btn') {
+                document.getElementById('deck-file-input').click();
+            }
+            if (e.target.id === 'export-deck-json-btn') {
+                exportCurrentDeck('json');
+            }
+            if (e.target.id === 'export-deck-csv-btn') {
+                exportCurrentDeck('csv');
+            }
+            // Flashcard interactions
+            if (e.target.id === 'delete-current-deck-btn') {
+                if (currentDeckId) {
+                    deleteDeck(currentDeckId);
+                    currentDeckId = null;
+                    currentDeckName = '';
+                    cards = [];
+                    reviewCards = [];
+                    render();
+                }
+            }
+            if (e.target.id === 'back-to-decks-btn') {
+                currentDeckId = null;
+                currentDeckName = '';
+                cards = [];
+                reviewCards = [];
+                render();
+            }
+            if (e.target.closest('.flashcard')) {
+                e.target.closest('.flashcard').classList.toggle('flipped');
+            }
+             if (e.target.closest('.srs-btn')) {
+                const quality = parseInt(e.target.closest('.srs-btn').dataset.quality, 10);
+                handleCardReview(quality);
+            }
+            if (e.target.id === 'delete-card-btn') {
+                const cardId = e.target.dataset.id;
+                deleteCard(cardId);
+            }
+            if (e.target.closest('.clear-file-btn')) {
+                const key = e.target.closest('.clear-file-btn').dataset.key;
+                clearNewCardFile(key);
+            }
+             // Note interactions
+            if (e.target.id === 'create-note-btn') openNoteModal();
+            if (e.target.closest('.note-card')) {
+                const noteCard = e.target.closest('.note-card');
+                 if (!e.target.closest('.delete-note-btn')) {
+                     openNoteModal(noteCard.dataset.id, noteCard.dataset.title, noteCard.dataset.content, noteCard.dataset.tags);
+                 }
+            }
+            if (e.target.closest('.delete-note-btn')) {
+                e.stopPropagation();
+                const noteId = e.target.closest('.delete-note-btn').dataset.id;
+                deleteNote(noteId);
+            }
+            if (e.target.closest('.markdown-btn')) {
+                const action = e.target.closest('.markdown-btn').dataset.action;
+                handleToolbarClick(action);
+            }
+            if (e.target.id === 'export-md-btn') {
+                exportNoteAsMarkdown();
+            }
+            if (e.target.id === 'export-pdf-btn') {
+                exportNoteAsPdf();
+            }
+            // Timer interactions
+            if (e.target.id === 'timer-start-btn') startTimer();
+            if (e.target.id === 'timer-pause-btn') pauseTimer();
+            if (e.target.id === 'timer-reset-btn') resetTimer();
+            if (e.target.closest('.timer-mode-btn')) {
+                timerMode = e.target.closest('.timer-mode-btn').dataset.mode;
+                resetTimer();
+            }
+            if (e.target.id === 'exit-timer-btn') {
+                exitTimerView();
+            }
+            if (e.target.id === 'toggle-sound-btn') {
+                toggleFocusSound();
+            }
+            if (e.target.id === 'timer-settings-btn') {
+                openTimerSettingsModal();
+            }
+            if(e.target.id === 'close-settings-modal-btn' || e.target.id === 'save-settings-btn') {
+                if(e.target.id === 'save-settings-btn') saveTimerSettings();
+                closeTimerSettingsModal();
+            }
+            if (e.target.id === 'upload-sound-btn') {
+                 document.getElementById('sound-upload-input').click();
+            }
+            if(e.target.closest('.sound-option-btn')) {
+                const clickedBtn = e.target.closest('.sound-option-btn');
+                const soundType = clickedBtn.dataset.sound;
+                document.querySelectorAll('.sound-option-btn').forEach(btn => btn.classList.remove('bg-indigo-600'));
+                clickedBtn.classList.add('bg-indigo-600');
+                playPreviewSound(soundType, userStats.customTimerSoundURL);
+            }
+            if (e.target.id === 'modal-upload-background-btn') {
+                document.getElementById('background-upload-input').click();
+            }
+            if (e.target.id === 'modal-remove-background-btn') {
+                removeBackgroundImage();
+            }
+            if (e.target.closest('.sound-preset-btn')) {
+                const preset = e.target.closest('.sound-preset-btn').dataset.sound;
+                if (isSoundPlaying && preset !== currentSoundPreset) {
+                    playFocusSound(preset);
+                } else {
+                    currentSoundPreset = preset;
+                }
+                renderTimerView();
+            }
+             // Tag Filters
+            if (e.target.closest('.deck-tag-filter')) {
+                const tag = e.target.closest('.deck-tag-filter').dataset.tag;
+                deckTagFilter = tag === 'All' ? null : tag;
+                renderDecksView();
+            }
+            if (e.target.closest('.note-tag-filter')) {
+                const tag = e.target.closest('.note-tag-filter').dataset.tag;
+                noteTagFilter = tag === 'All' ? null : tag;
+                renderNotesView();
+            }
+            // AI Features
+            if (e.target.id === 'generate-cards-btn') generateCardsWithAI();
+            if (e.target.id === 'summarize-note-btn') summarizeNote();
+            if (e.target.id === 'expand-note-btn') expandNote();
+            // Quiz Interactions
+            if (e.target.closest('.start-quiz-btn')) {
+                const deckId = e.target.closest('.start-quiz-btn').dataset.id;
+                startQuiz(deckId);
+            }
+            if (e.target.closest('.quiz-option')) {
+                handleQuizAnswer(e.target.closest('.quiz-option'));
+            }
+            if (e.target.id === 'back-to-quiz-selection-btn') {
+                endQuiz();
+            }
+        }
+        
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const fileContent = e.target.result;
+                const fileType = file.name.split('.').pop().toLowerCase();
+                processDeckImport(fileContent, fileType);
+            };
+            reader.readAsText(file);
+            event.target.value = '';
+        }
+
+        async function handleCustomSoundUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const btn = document.getElementById('upload-sound-btn');
+            const originalText = btn.textContent;
+            btn.textContent = 'Reading...';
+            btn.disabled = true;
+            try {
+                const dataUrl = await readFileAsDataURL(file);
+                userStats.customTimerSoundURL = dataUrl;
+                userStats.customTimerSoundName = file.name;
+                saveStateToLocalStorage();
+                document.getElementById('custom-sound-name').textContent = file.name;
+                openTimerSettingsModal(); // Refresh modal state
+            } catch (error) {
+                console.error("Error reading sound file:", error);
+                document.getElementById('custom-sound-name').textContent = "Upload failed";
+            } finally {
+                btn.textContent = originalText;
+                btn.disabled = false;
+                event.target.value = '';
+            }
+        }
+
+        async function handleBackgroundImageUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const btn = document.getElementById('modal-upload-background-btn');
+            const originalText = btn.textContent;
+            btn.textContent = 'Reading...';
+            btn.disabled = true;
+            try {
+                const dataUrl = await readFileAsDataURL(file);
+                userStats.customBackgroundURL = dataUrl;
+                saveStateToLocalStorage();
+                document.body.style.backgroundImage = `url(${dataUrl})`;
+            } catch (error) {
+                console.error("Error uploading background:", error);
+                 btn.textContent = "Upload Failed";
+            } finally {
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                    btn.disabled = false;
+                }, 2000);
+            }
+            event.target.value = '';
+        }
+
+        function handleBodyChange(e) {
+            if (e.target.matches('.card-file-input')) {
+                handleCardFileInputChange(e.target);
+            }
+        }
+
+        function handleBodyInput(e) {
+            if (e.target.id === 'deck-search-input') {
+                deckSearchTerm = e.target.value;
+                renderDecksView();
+            }
+            if (e.target.id === 'note-search-input') {
+                noteSearchTerm = e.target.value;
+                renderNotesView();
+            }
+        }
+        
+        function handleBodySubmit(e) {
+            e.preventDefault();
+            if (e.target.id === 'new-deck-form') {
+                 const nameInput = document.getElementById('new-deck-name');
+                 const tagsInput = document.getElementById('new-deck-tags');
+                 if (nameInput && nameInput.value.trim()) {
+                     createDeck(nameInput.value.trim(), tagsInput.value.trim());
+                 }
+            }
+            if (e.target.id === 'new-card-form') {
+                 const frontInput = document.getElementById('card-front');
+                 const backInput = document.getElementById('card-back');
+                 if (frontInput.value.trim() || backInput.value.trim() || Object.values(newCardFiles).some(f => f)) {
+                     createCard(frontInput.value.trim(), backInput.value.trim());
+                 }
+            }
+        }
+
+        function handleBodyMouseOver(e) {
+            if (e.target.classList.contains('chart-bar')) {
+                const tooltip = document.getElementById('chart-tooltip');
+                const minutes = e.target.dataset.minutes;
+                tooltip.textContent = `${minutes} min`;
+                tooltip.classList.remove('hidden');
+            }
+        }
+
+        function handleBodyMouseOut(e) {
+            if (e.target.classList.contains('chart-bar')) {
+                const tooltip = document.getElementById('chart-tooltip');
+                tooltip.classList.add('hidden');
+            }
+        }
+
+        function handleBodyMouseMove(e) {
+            const tooltip = document.getElementById('chart-tooltip');
+            if (tooltip && !tooltip.classList.contains('hidden')) {
+                const chartContainer = e.target.closest('.relative');
+                if (chartContainer) {
+                    const rect = chartContainer.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    tooltip.style.left = `${x + 15}px`;
+                    tooltip.style.top = `${y}px`;
+                }
+            }
+        }
+
+        // --- Navigation & Rendering ---
+        function switchTab(tabKey) {
+            currentTab = tabKey;
+            Object.values(tabs).forEach(tab => {
+                tab.className = 'tab-btn whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-500';
+            });
+            tabs[tabKey].className = 'tab-btn whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm border-indigo-500 text-indigo-400';
+            
+            if (tabKey === 'timer') {
+                appContainer.classList.add('hidden');
+                document.body.classList.add('timer-active-body');
+                document.body.style.backgroundImage = userStats.customBackgroundURL ? `url(${userStats.customBackgroundURL})` : defaultBackground;
+                startClock();
+                // Attempt to lock screen to landscape on mobile devices
+                if (typeof screen.orientation?.lock === 'function' && window.innerWidth < 768) {
+                    screen.orientation.lock('landscape').catch(error => {
+                        console.log("Orientation lock failed:", error);
+                    });
+                }
+            } else {
+                appContainer.classList.remove('hidden');
+                document.body.classList.remove('timer-active-body');
+                document.body.style.backgroundImage = 'none';
+                stopClock();
+                // Unlock screen orientation when leaving the timer
+                if (typeof screen.orientation?.unlock === 'function') {
+                    screen.orientation.unlock();
+                }
+            }
+            render();
+        }
+
+        function render() {
+            Object.values(views).forEach(view => view.classList.add('hidden'));
+
+            if (currentQuizState.isActive) {
+                 views.quizSession.classList.remove('hidden');
+                 renderQuizSessionView();
+            } else if (currentDeckId) {
+                views.flashcards.classList.remove('hidden');
+                renderFlashcardView();
+            } else {
+                views[currentTab]?.classList.remove('hidden');
+                switch (currentTab) {
+                    case 'dashboard': renderDashboardView(); break;
+                    case 'decks': renderDecksView(); break;
+                    case 'notes': renderNotesView(); break;
+                    case 'quiz': renderQuizView(); break;
+                    case 'timer': renderTimerView(); break;
+                }
+            }
+        }
+        
+        // --- Dashboard Logic ---
+        function renderDashboardView() {
+            const today = new Date().toISOString().split('T')[0];
+            const todayLog = allStudyLogs.find(log => log.id === today) || {};
+            const timeStudiedSeconds = allStudyLogs.reduce((total, log) => total + (log.timeStudied || 0), 0);
+            const timeStudiedHours = (timeStudiedSeconds / 3600).toFixed(1);
+            const currentStreak = userStats.currentStreak || 0;
+            const longestStreak = userStats.longestStreak || 0;
+
+            let html = `
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div class="lg:col-span-2">
+                        <h2 class="text-2xl sm:text-3xl font-bold mb-6 text-white">Dashboard</h2>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                            <div class="bg-slate-800/60 backdrop-blur-sm border border-slate-700 p-6 rounded-lg shadow-sm">
+                                <h3 class="text-slate-400 text-sm font-medium mb-2">TOTAL CARDS REVIEWED</h3>
+                                <p class="text-3xl sm:text-4xl font-bold text-white">${userStats.totalCardsReviewed || 0}</p>
+                            </div>
+                            <div class="bg-slate-800/60 backdrop-blur-sm border border-slate-700 p-6 rounded-lg shadow-sm">
+                                <h3 class="text-slate-400 text-sm font-medium mb-2">TOTAL SESSIONS</h3>
+                                <p class="text-3xl sm:text-4xl font-bold text-white">${userStats.totalPomodoroSessions || 0}</p>
+                            </div>
+                            <div class="bg-slate-800/60 backdrop-blur-sm border border-slate-700 p-6 rounded-lg shadow-sm">
+                                <h3 class="text-slate-400 text-sm font-medium mb-2">TOTAL TIME STUDIED</h3>
+                                <p class="text-3xl sm:text-4xl font-bold text-white">${timeStudiedHours} <span class="text-xl sm:text-2xl font-medium text-slate-300">hrs</span></p>
+                            </div>
+                        </div>
+
+                        <h2 class="text-xl sm:text-2xl font-bold mb-4 text-white">Weekly Study Activity</h2>
+                        <div class="bg-slate-800/60 backdrop-blur-sm border border-slate-700 p-6 rounded-lg shadow-sm relative">
+                            ${renderStudyHistoryChart()}
+                            <div id="chart-tooltip" class="hidden absolute bg-slate-900 text-white text-sm rounded-md py-1 px-2 pointer-events-none transition-opacity duration-200 shadow-lg z-50"></div>
+                        </div>
+                        
+                        <h2 class="text-xl sm:text-2xl font-bold mb-4 mt-8 text-white">Achievements</h2>
+                        <div class="bg-slate-800/60 backdrop-blur-sm border border-slate-700 p-6 rounded-lg shadow-sm">
+                            ${renderAchievements()}
+                        </div>
+                    </div>
+                    <div class="lg:col-span-1">
+                        <h2 class="text-2xl sm:text-3xl font-bold mb-6 text-white">Study Streak</h2>
+                        <div class="bg-slate-800/60 backdrop-blur-sm border border-slate-700 p-6 rounded-lg shadow-sm mb-6 text-center">
+                             <p class="text-5xl sm:text-6xl font-bold text-amber-400 mb-2">${currentStreak} 🔥</p>
+                             <p class="text-slate-300 font-medium">Current Streak</p>
+                             <p class="text-sm text-slate-400 mt-2">Longest: ${longestStreak} days</p>
+                        </div>
+                    </div>
+                </div>`;
+            views.dashboard.innerHTML = html;
+        }
+
+        function renderStudyHistoryChart() {
+            const today = new Date();
+            const last7DaysData = [];
+            let maxMinutes = 0;
+
+            for (let i = 6; i >= 0; i--) {
+                const date = new Date(today);
+                date.setDate(today.getDate() - i);
+                const dateString = date.toISOString().split('T')[0];
+                const dayInitial = date.toLocaleDateString('en-us', { weekday: 'short' }).charAt(0);
+
+                const log = allStudyLogs.find(l => l.id === dateString);
+                const minutes = log ? Math.round(log.timeStudied / 60) : 0;
+                
+                last7DaysData.push({ day: dayInitial, minutes: minutes });
+                if (minutes > maxMinutes) maxMinutes = minutes;
+            }
+            
+            if (maxMinutes === 0) maxMinutes = 10;
+
+            const chartHeight = 150;
+            let barsHtml = last7DaysData.map((data, index) => {
+                const barHeight = maxMinutes > 0 ? (data.minutes / maxMinutes) * chartHeight : 0;
+                const xPos = index * (100 / 7);
+                const barWidth = 100 / 7 - 2;
+                return `
+                    <g class="chart-bar-group cursor-pointer" transform="translate(${xPos}, 0)">
+                        <rect class="chart-bar fill-current text-indigo-500 hover:text-indigo-400 transition-colors" data-minutes="${data.minutes}"
+                            x="1%" y="${chartHeight - barHeight}" width="${barWidth}%" height="${barHeight}" rx="4"></rect>
+                    </g>`;
+            }).join('');
+
+            let labelsHtml = last7DaysData.map((data, index) => {
+                const xPos = index * (100 / 7) + (100 / 14);
+                return `<text x="${xPos}%" y="${chartHeight + 20}" fill="#94a3b8" text-anchor="middle" class="text-xs font-medium">${data.day}</text>`;
+            }).join('');
+
+            return `<svg width="100%" height="${chartHeight + 30}" aria-labelledby="chartTitle" role="img"><g>${barsHtml}</g><g>${labelsHtml}</g></svg>`;
+        }
+
+        // --- Flashcard Decks Logic ---
+        function renderDecksView() {
+            const searchFilteredDecks = deckSearchTerm ? allDecks.filter(deck => deck.name.toLowerCase().includes(deckSearchTerm.toLowerCase())) : allDecks;
+            const filteredDecks = deckTagFilter ? searchFilteredDecks.filter(deck => deck.tags && deck.tags.includes(deckTagFilter)) : searchFilteredDecks;
+            const allTags = [...new Set(allDecks.flatMap(deck => deck.tags || []))].sort();
+
+            let tagFilterHtml = `<div class="flex flex-wrap gap-2 mb-6">`;
+            const allBtnClass = !deckTagFilter ? 'bg-indigo-500 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600';
+            tagFilterHtml += `<button data-tag="All" class="deck-tag-filter px-3 py-1 text-sm font-medium rounded-full transition-colors ${allBtnClass}">All</button>`;
+            allTags.forEach(tag => {
+                const btnClass = tag === deckTagFilter ? 'bg-indigo-500 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600';
+                tagFilterHtml += `<button data-tag="${tag}" class="deck-tag-filter px-3 py-1 text-sm font-medium rounded-full transition-colors ${btnClass}">${tag}</button>`;
+            });
+            tagFilterHtml += `</div>`;
+
+            let html = `
+                <div class="bg-slate-800/60 backdrop-blur-sm border border-slate-700 p-6 rounded-lg shadow-sm mb-6">
+                    <h2 class="text-xl font-semibold mb-4 text-white">Create a New Deck</h2>
+                    <form id="new-deck-form" class="space-y-4">
+                        <input type="text" id="new-deck-name" placeholder="Deck Name (e.g., Chapter 1 Biology)" class="w-full px-4 py-2 text-slate-200 bg-slate-700 border border-slate-600 rounded-lg" required>
+                        <input type="text" id="new-deck-tags" placeholder="Tags (comma-separated, e.g., science, biology)" class="w-full px-4 py-2 text-slate-200 bg-slate-700 border border-slate-600 rounded-lg">
+                        <button type="submit" class="w-full px-6 py-2 bg-indigo-600 text-white font-medium rounded-lg shadow-sm hover:bg-indigo-700">Create Deck</button>
+                    </form>
+                    <button type="button" id="import-deck-btn" class="w-full mt-2 px-6 py-2 bg-slate-600 text-white font-medium rounded-lg shadow-sm hover:bg-slate-500">Import Deck from File</button>
+                    <div id="import-feedback" class="text-sm mt-2 text-center"></div>
+                </div>
+                <div class="mb-6">
+                    <input type="text" id="deck-search-input" placeholder="🔍 Search your decks..." class="w-full px-4 py-2 text-slate-200 bg-slate-700/60 border border-slate-600 rounded-lg" value="${deckSearchTerm}">
+                </div>
+                ${allTags.length > 0 ? tagFilterHtml : ''}
+                <h2 class="text-2xl font-bold mb-4 text-white">Your Decks</h2>`;
+
+            if (filteredDecks.length === 0) {
+                html += `<p class="text-slate-400">${deckSearchTerm || deckTagFilter ? 'No decks match your search or filter.' : "You haven't created any decks yet."}</p>`;
+            } else {
+                html += '<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">';
+                filteredDecks.forEach(deck => {
+                    const deckNameHtml = highlightMatches(deck.name, deckSearchTerm);
+                    const tagsHtml = (deck.tags && deck.tags.length) ? `<div class="flex flex-wrap gap-2 mt-2">${deck.tags.map(tag => `<span class="px-2 py-0.5 text-xs bg-slate-700 text-slate-300 rounded-full">${tag}</span>`).join('')}</div>` : '';
+                    html += `
+                        <div data-id="${deck.id}" data-name="${deck.name}" class="deck-card bg-slate-800/60 p-6 rounded-lg shadow-sm hover:-translate-y-1 transition-all cursor-pointer flex flex-col justify-between">
+                            <div>
+                                <h3 class="text-lg font-semibold text-slate-200 mb-2">${deckNameHtml}</h3>
+                                ${tagsHtml}
+                            </div>
+                            <div class="flex justify-end mt-4">
+                                <button data-id="${deck.id}" class="delete-deck-btn text-slate-500 hover:text-red-400 p-1 rounded-full">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd" /></svg>
+                                </button>
+                            </div>
+                        </div>`;
+                });
+                html += '</div>';
+            }
+            views.decks.innerHTML = html;
+        }
+
+        function createDeck(name, tagsString) {
+            const tags = tagsString.split(',').map(tag => tag.trim()).filter(Boolean);
+            const newDeck = {
+                id: Date.now().toString(),
+                name,
+                tags,
+                cards: [],
+                createdAt: new Date().toISOString()
+            };
+            allDecks.push(newDeck);
+            saveStateToLocalStorage();
+            document.getElementById('new-deck-form').reset();
+            renderDecksView();
+        }
+        
+        function deleteDeck(deckId) {
+            allDecks = allDecks.filter(deck => deck.id !== deckId);
+            saveStateToLocalStorage();
+            if(currentDeckId === deckId) { // If deleting the currently open deck
+                currentDeckId = null;
+                currentDeckName = '';
+                cards = [];
+                reviewCards = [];
+            }
+            render();
+        }
+
+        function openDeck() {
+            const currentDeck = allDecks.find(deck => deck.id === currentDeckId);
+            if (currentDeck) {
+                cards = currentDeck.cards || [];
+                filterReviewCards();
+            }
+            render();
+        }
+
+        function filterReviewCards() {
+            const now = new Date();
+            reviewCards = cards.filter(card => {
+                if (!card.nextReviewDate) return true;
+                const reviewDate = new Date(card.nextReviewDate);
+                return reviewDate <= now;
+            }).sort((a, b) => {
+                const dateA = a.nextReviewDate ? new Date(a.nextReviewDate) : new Date(0);
+                const dateB = b.nextReviewDate ? new Date(b.nextReviewDate) : new Date(0);
+                return dateA - dateB;
+            });
+        }
+        
+        function renderFlashcardView() {
+            let html = `
+                <div class="flex flex-col sm:flex-row justify-between items-center gap-4 mb-6">
+                    <button id="back-to-decks-btn" class="text-indigo-400 hover:text-indigo-300 font-medium self-start sm:self-center">← Back to Decks</button>
+                    <h2 class="text-xl sm:text-2xl font-bold text-slate-100 text-center">${currentDeckName}</h2>
+                    <div class="flex items-center gap-2 self-end sm:self-center">
+                        <button id="export-deck-json-btn" class="text-xs sm:text-sm text-sky-400 hover:text-sky-300 bg-sky-500/10 px-3 py-1 rounded-md">Export JSON</button>
+                        <button id="export-deck-csv-btn" class="text-xs sm:text-sm text-teal-400 hover:text-teal-300 bg-teal-500/10 px-3 py-1 rounded-md">Export CSV</button>
+                        <button id="delete-current-deck-btn" class="text-xs sm:text-sm text-red-400 hover:text-red-300 bg-red-500/10 px-3 py-1 rounded-md">Delete Deck</button>
+                    </div>
+                </div>`;
+            
+            if (reviewCards.length > 0) {
+                const card = reviewCards[0];
+                const renderSide = (side) => {
+                    let sideHtml = '';
+                    if (card[`${side}ImageURL`]) { sideHtml += `<img src="${card[`${side}ImageURL`]}" alt="Flashcard image" class="max-h-40 mx-auto rounded-lg mb-4">`; }
+                    if (card[`${side}AudioURL`]) { sideHtml += `<audio controls src="${card[`${side}AudioURL`]}" class="w-full max-w-xs mx-auto my-4"></audio>`; }
+                    sideHtml += markdownConverter.makeHtml(card[side] || '');
+                    return sideHtml;
+                }
+
+                html += `
+                    <div class="text-center mb-4 text-slate-400">${reviewCards.length} cards to review.</div>
+                    <div class="perspective-container mb-6">
+                        <div class="flashcard relative w-full h-auto min-h-[20rem]">
+                            <div class="flashcard-inner absolute w-full h-full">
+                                <div class="flashcard-front absolute w-full h-full bg-slate-800 rounded-xl shadow-lg flex items-center justify-center p-6 text-center"><div class="prose max-w-none dark:prose-invert">${renderSide('front')}</div></div>
+                                <div class="flashcard-back absolute w-full h-full bg-slate-800 rounded-xl shadow-lg flex flex-col items-center justify-center p-6 text-center">
+                                    <div class="prose max-w-none dark:prose-invert flex-grow">${renderSide('back')}</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="review-controls" class="flex flex-wrap justify-center items-center gap-2 sm:gap-4 my-8">
+                        <button data-quality="1" class="srs-btn px-4 py-2 sm:px-6 sm:py-3 bg-rose-600/90 text-white font-bold rounded-lg shadow-lg hover:bg-rose-600">Again</button>
+                        <button data-quality="2" class="srs-btn px-4 py-2 sm:px-6 sm:py-3 bg-orange-500/90 text-white font-bold rounded-lg shadow-lg hover:bg-orange-500">Hard</button>
+                        <button data-quality="4" class="srs-btn px-4 py-2 sm:px-6 sm:py-3 bg-sky-500/90 text-white font-bold rounded-lg shadow-lg hover:bg-sky-500">Good</button>
+                        <button data-quality="5" class="srs-btn px-4 py-2 sm:px-6 sm:py-3 bg-emerald-500/90 text-white font-bold rounded-lg shadow-lg hover:bg-emerald-500">Easy</button>
+                    </div>
+                    <div class="flex justify-center mb-6"><button id="delete-card-btn" data-id="${card.id}" class="text-sm text-red-400 hover:text-red-300">Delete this card</button></div>`;
+            } else if (cards.length > 0) {
+                html += `<div class="text-center text-slate-300 bg-slate-800/60 p-8 rounded-lg"><h3 class="text-xl font-semibold mb-2">Great work!</h3><p>You've reviewed all due cards for today.</p></div>`;
+            } else {
+                html += '<p class="text-center text-slate-400 bg-slate-800/60 p-8 rounded-lg">This deck is empty. Add a card below!</p>';
+            }
+
+            const createFileUploader = (side, type, label, accept) => {
+                const key = `${side}${type.charAt(0).toUpperCase() + type.slice(1)}`;
+                const file = newCardFiles[key];
+                return `<div class="mt-2"><label class="text-sm text-slate-400">${label}</label><input type="file" id="card-${side}-${type}-input" data-key="${key}" class="card-file-input hidden" accept="${accept}"><div id="${key}-preview-container" class="mt-1 p-2 border-2 border-dashed border-slate-600 rounded-lg text-center">${file ? (type === 'image' ? `<img src="${URL.createObjectURL(file)}" class="max-h-24 mx-auto rounded-md"><button type="button" data-key="${key}" class="clear-file-btn text-xs text-red-400 mt-1">Remove</button>` : `<p class="text-xs text-slate-300 truncate">${file.name}</p><button type="button" data-key="${key}" class="clear-file-btn text-xs text-red-400 mt-1">Remove</button>`) : `<button type="button" onclick="document.getElementById('card-${side}-${type}-input').click()" class="text-indigo-400 text-sm hover:underline">Upload ${type}</button>`}</div></div>`;
+            };
+
+            html += `
+                <div class="bg-slate-800/60 p-6 rounded-lg shadow-sm mt-8">
+                    <h3 class="text-xl font-semibold mb-4 text-white">Add a New Card</h3>
+                     <form id="new-card-form">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                            <div><textarea id="card-front" placeholder="Card Front..." class="w-full p-3 bg-slate-700 rounded-lg" rows="4"></textarea>${createFileUploader('front', 'image', 'Front Image', 'image/*')}${createFileUploader('front', 'audio', 'Front Audio', 'audio/*')}</div>
+                            <div><textarea id="card-back" placeholder="Card Back..." class="w-full p-3 bg-slate-700 rounded-lg" rows="4"></textarea>${createFileUploader('back', 'image', 'Back Image', 'image/*')}${createFileUploader('back', 'audio', 'Back Audio', 'audio/*')}</div>
+                        </div>
+                        <button type="submit" class="w-full px-6 py-3 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700">Add Card</button>
+                        <button type="button" id="generate-cards-btn" class="w-full mt-2 px-6 py-3 bg-teal-600 text-white font-medium rounded-lg hover:bg-teal-700">✨ Generate Sample Cards</button>
+                    </form>
+                </div>`;
+            views.flashcards.innerHTML = html;
+        }
+
+        async function createCard(front, back) {
+            const btn = document.querySelector('#new-card-form button[type="submit"]');
+            btn.disabled = true;
+            btn.innerHTML = `<span class="animate-pulse">Saving...</span>`;
+
+            try {
+                const currentDeck = allDecks.find(deck => deck.id === currentDeckId);
+                if (!currentDeck) throw new Error("Deck not found");
+
+                const newCard = {
+                    id: Date.now().toString(),
+                    front, back, createdAt: new Date().toISOString(), 
+                    // SRS Defaults
+                    repetition: 0,
+                    easinessFactor: 2.5,
+                    interval: 0,
+                    nextReviewDate: new Date().toISOString()
+                };
+
+                const uploadPromises = Object.entries(newCardFiles)
+                    .filter(([key, file]) => file)
+                    .map(async ([key, file]) => {
+                        const dataUrl = await readFileAsDataURL(file);
+                        return { key: `${key}URL`, url: dataUrl };
+                    });
+                
+                const uploadResults = await Promise.all(uploadPromises);
+                if (uploadResults.length > 0) {
+                    uploadResults.forEach(({ key, url }) => { newCard[key] = url; });
+                }
+                
+                if (!currentDeck.cards) currentDeck.cards = [];
+                currentDeck.cards.push(newCard);
+                saveStateToLocalStorage();
+                
+                document.getElementById('new-card-form').reset();
+                clearNewCardFile('all');
+                filterReviewCards();
+                renderFlashcardView();
+            } catch (error) {
+                console.error("Error creating card:", error);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = 'Add Card';
+            }
+        }
+        
+        function deleteCard(cardId) {
+            const deck = allDecks.find(d => d.id === currentDeckId);
+            if (deck && deck.cards) {
+                deck.cards = deck.cards.filter(c => c.id !== cardId);
+                saveStateToLocalStorage();
+                openDeck();
+            }
+        }
+        
+        // --- Notes Logic ---
+        function renderNotesView() {
+            const lowerCaseSearchTerm = noteSearchTerm.toLowerCase();
+            const searchFilteredNotes = noteSearchTerm ? allNotes.filter(note => note.title.toLowerCase().includes(lowerCaseSearchTerm) || note.content.toLowerCase().includes(lowerCaseSearchTerm)) : allNotes;
+            const filteredNotes = noteTagFilter ? searchFilteredNotes.filter(note => note.tags && note.tags.includes(noteTagFilter)) : searchFilteredNotes;
+            const allTags = [...new Set(allNotes.flatMap(note => note.tags || []))].sort();
+
+            let tagFilterHtml = `<div class="flex flex-wrap gap-2 mb-6">`;
+            const allBtnClass = !noteTagFilter ? 'bg-indigo-500 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600';
+            tagFilterHtml += `<button data-tag="All" class="note-tag-filter px-3 py-1 text-sm rounded-full ${allBtnClass}">All</button>`;
+            allTags.forEach(tag => {
+                const btnClass = tag === noteTagFilter ? 'bg-indigo-500 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600';
+                tagFilterHtml += `<button data-tag="${tag}" class="note-tag-filter px-3 py-1 text-sm rounded-full ${btnClass}">${tag}</button>`;
+            });
+            tagFilterHtml += `</div>`;
+
+             let html = `
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-bold text-white">Your Notes</h2>
+                    <button id="create-note-btn" class="px-5 py-2 bg-indigo-600 text-white font-medium rounded-lg shadow-sm hover:bg-indigo-700">New Note</button>
+                </div>
+                <div class="mb-6"><input type="text" id="note-search-input" placeholder="🔍 Search notes..." class="w-full px-4 py-2 bg-slate-700/60 rounded-lg" value="${noteSearchTerm}"></div>
+                ${allTags.length > 0 ? tagFilterHtml : ''}`;
+
+            if (filteredNotes.length === 0) {
+                html += `<p class="text-slate-400">${noteSearchTerm || noteTagFilter ? 'No notes match your filter.' : "You don't have any notes yet."}</p>`;
+            } else {
+                html += '<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">';
+                filteredNotes.forEach(note => {
+                    const snippet = note.content ? markdownConverter.makeHtml(note.content.substring(0, 100) + '...') : 'No content';
+                    const titleHtml = highlightMatches(note.title, noteSearchTerm);
+                    const tagsHtml = (note.tags && note.tags.length) ? `<div class="flex flex-wrap gap-2 mt-2">${note.tags.map(tag => `<span class="px-2 py-0.5 text-xs bg-slate-700 rounded-full">${tag}</span>`).join('')}</div>` : '';
+                    html += `
+                        <div data-id="${note.id}" data-title="${encodeURIComponent(note.title)}" data-content="${encodeURIComponent(note.content)}" data-tags="${encodeURIComponent(JSON.stringify(note.tags || []))}" class="note-card bg-slate-800/60 p-6 rounded-lg cursor-pointer flex flex-col justify-between">
+                            <div><h3 class="text-lg font-semibold text-slate-200 mb-2">${titleHtml}</h3><div class="text-sm text-slate-400 prose prose-sm max-w-none mb-2">${snippet}</div>${tagsHtml}</div>
+                            <div class="flex justify-end mt-4"><button data-id="${note.id}" class="delete-note-btn text-slate-500 hover:text-red-400 p-1 rounded-full"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd" /></svg></button></div>
+                        </div>`;
+                });
+                html += '</div>';
+            }
+            views.notes.innerHTML = html;
+        }
+        
+        function openNoteModal(id = null, title = '', content = '', tags = '[]') {
+            document.getElementById('note-id-input').value = id || '';
+            document.getElementById('note-modal-title').textContent = id ? 'Edit Note' : 'Create Note';
+            document.getElementById('note-title-input').value = id ? decodeURIComponent(title) : '';
+            document.getElementById('note-content-input').value = id ? decodeURIComponent(content) : '';
+            const noteTags = id ? JSON.parse(decodeURIComponent(tags)) : [];
+            document.getElementById('note-tags-input').value = noteTags.join(', ');
+            document.getElementById('note-modal-error').classList.add('hidden');
+            noteModal.classList.remove('hidden');
+        }
+
+        function closeNoteModal() { noteModal.classList.add('hidden'); }
+
+        function handleSaveNote() {
+            const id = document.getElementById('note-id-input').value;
+            const title = document.getElementById('note-title-input').value.trim();
+            const content = document.getElementById('note-content-input').value.trim();
+            const tagsString = document.getElementById('note-tags-input').value.trim();
+            const tags = tagsString.split(',').map(tag => tag.trim()).filter(Boolean);
+            const errorEl = document.getElementById('note-modal-error');
+
+            if (!title) {
+                errorEl.textContent = 'Please enter a title.';
+                errorEl.classList.remove('hidden');
+                return;
+            }
+            errorEl.classList.add('hidden');
+
+            if (id) {
+                const note = allNotes.find(n => n.id === id);
+                if(note) { note.title = title; note.content = content; note.tags = tags; }
+            } else {
+                allNotes.push({ id: Date.now().toString(), title, content, tags, createdAt: new Date().toISOString() });
+            }
+            saveStateToLocalStorage();
+            renderNotesView();
+            closeNoteModal();
+        }
+        
+        function deleteNote(noteId) {
+            allNotes = allNotes.filter(n => n.id !== noteId);
+            saveStateToLocalStorage();
+            renderNotesView();
+        }
+        
+        // --- Timer & Clock Logic ---
+
+        // --- Audio Logic for Focus Sounds ---
+        function initializeAudioContext() {
+            if (!audioContext || audioContext.state === 'closed') {
+                try {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                } catch (e) {
+                    console.error("Web Audio API is not supported in this browser.");
+                }
+            }
+        }
+
+        function createWhiteNoiseSource() {
+            const bufferSize = 2 * audioContext.sampleRate;
+            const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
+            const output = noiseBuffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                output[i] = Math.random() * 2 - 1;
+            }
+
+            const source = audioContext.createBufferSource();
+            source.buffer = noiseBuffer;
+            source.loop = true;
+
+            const gainNode = audioContext.createGain();
+            gainNode.gain.setValueAtTime(0.05, audioContext.currentTime); // Lower volume
+            source.connect(gainNode);
+            
+            return { source, outputNode: gainNode };
+        }
+        
+        function createRainSoundSource() {
+            const bufferSize = audioContext.sampleRate * 2;
+            const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
+            const output = noiseBuffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                output[i] = Math.random() * 2 - 1;
+            }
+            
+            const whiteNoise = audioContext.createBufferSource();
+            whiteNoise.buffer = noiseBuffer;
+            whiteNoise.loop = true;
+
+            const b_filter = audioContext.createBiquadFilter();
+            b_filter.type = "bandpass";
+            b_filter.frequency.value = 800;
+            b_filter.Q.value = 0.5;
+
+            const gainNode = audioContext.createGain();
+            gainNode.gain.setValueAtTime(0.1, audioContext.currentTime); // Lower volume
+
+            whiteNoise.connect(b_filter);
+            b_filter.connect(gainNode);
+
+            return { source: whiteNoise, outputNode: gainNode };
+        }
+        
+        function createCafeSoundSource() {
+            const oscillator = audioContext.createOscillator();
+            oscillator.type = 'sawtooth';
+            oscillator.frequency.value = 55; // A low A note
+
+            const lfo = audioContext.createOscillator();
+            lfo.type = 'square';
+            lfo.frequency.value = 1; // 1 Hz, for a simple beat
+
+            const lfoGain = audioContext.createGain();
+            lfoGain.gain.value = 0.2;
+
+            const mainGain = audioContext.createGain();
+            mainGain.gain.setValueAtTime(0, audioContext.currentTime);
+            mainGain.gain.linearRampToValueAtTime(0.05, audioContext.currentTime + 0.1);
+
+            lfo.connect(lfoGain);
+            lfoGain.connect(mainGain.gain);
+            oscillator.connect(mainGain);
+
+            return { source: oscillator, outputNode: mainGain, extraNodes: [lfo] };
+        }
+
+        function playFocusSound(preset = 'noise') {
+            initializeAudioContext();
+            if (!audioContext) return;
+            
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+
+            stopFocusSound(true); // Stop previous sound without changing UI state
+
+            let sound;
+            currentSoundPreset = preset;
+            switch(preset) {
+                case 'rain': sound = createRainSoundSource(); break;
+                case 'cafe': sound = createCafeSoundSource(); break;
+                case 'noise':
+                default: sound = createWhiteNoiseSource(); break;
+            }
+
+            sound.outputNode.connect(audioContext.destination);
+            sound.source.start(0);
+            if (sound.extraNodes) {
+                sound.extraNodes.forEach(node => node.start(0));
+            }
+            
+            soundSource = sound;
+            isSoundPlaying = true;
+            renderTimerView();
+        }
+
+        function stopFocusSound(isPlayingNewSound = false) {
+            if (soundSource && soundSource.source) {
+                try {
+                    soundSource.source.stop();
+                    if (soundSource.extraNodes) {
+                        soundSource.extraNodes.forEach(node => node.stop());
+                    }
+                } catch (e) {
+                    // Ignore errors from trying to stop an already stopped source
+                }
+            }
+            soundSource = null;
+            if (!isPlayingNewSound) {
+                isSoundPlaying = false;
+                renderTimerView();
+            }
+        }
+
+        function toggleFocusSound() {
+            if (isSoundPlaying) {
+                stopFocusSound();
+            } else {
+                playFocusSound();
+            }
+        }
+
+        function renderTimerView() {
+            timeLeft = timeLeft === undefined ? timerDurations[timerMode] : timeLeft;
+            const minutes = Math.floor(timeLeft / 60);
+            const seconds = timeLeft % 60;
+            const pomodoroActive = timerMode === 'pomodoro' ? 'bg-white/20 text-white' : 'bg-transparent text-white/70';
+            const shortActive = timerMode === 'short' ? 'bg-white/20 text-white' : 'bg-transparent text-white/70';
+            const longActive = timerMode === 'long' ? 'bg-white/20 text-white' : 'bg-transparent text-white/70';
+            const soundOn = isSoundPlaying;
+            
+            views.timer.innerHTML = `
+                <div class="timer-view-fullscreen">
+                     <div class="absolute top-5 left-5 flex gap-2">
+                        <button id="exit-timer-btn" class="px-4 py-2 bg-white/10 text-white/80 rounded-lg hover:bg-white/20 backdrop-blur-sm transition">Exit</button>
+                    </div>
+                    <button id="timer-settings-btn" class="absolute top-5 right-5 p-2 bg-white/10 text-white/80 rounded-lg hover:bg-white/20 backdrop-blur-sm transition">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                    </button>
+
+                    <div id="live-clock" class="absolute top-16 right-5 text-white/80 text-lg font-medium text-right"></div>
+                    <div class="text-center p-8 rounded-2xl glass-card">
+                        <div class="flex justify-center gap-2 mb-8">
+                            <button data-mode="pomodoro" class="timer-mode-btn px-4 py-1.5 rounded-full text-sm font-medium transition hover:bg-white/10 ${pomodoroActive}">Pomodoro</button>
+                            <button data-mode="short" class="timer-mode-btn px-4 py-1.5 rounded-full text-sm font-medium transition hover:bg-white/10 ${shortActive}">Short Break</button>
+                            <button data-mode="long" class="timer-mode-btn px-4 py-1.5 rounded-full text-sm font-medium transition hover:bg-white/10 ${longActive}">Long Break</button>
+                        </div>
+                        <div class="text-7xl sm:text-9xl font-bold text-white mb-10 tracking-tighter tabular-nums">
+                            ${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}
+                        </div>
+                        <div class="flex justify-center gap-4">
+                             <button id="timer-start-btn" class="w-36 px-6 py-3 bg-white/90 text-slate-900 font-bold text-lg rounded-lg shadow-lg hover:bg-white transition uppercase tracking-wider ${timerState === 'running' ? 'hidden' : ''}">${timerState === 'paused' ? 'Resume' : 'Start'}</button>
+                             <button id="timer-pause-btn" class="w-36 px-6 py-3 bg-white/20 text-white font-bold text-lg rounded-lg shadow-lg hover:bg-white/30 backdrop-blur-sm transition uppercase tracking-wider ${timerState !== 'running' ? 'hidden' : ''}">Pause</button>
+                             <button id="timer-reset-btn" class="w-32 px-6 py-3 bg-white/20 text-white font-bold text-lg rounded-lg shadow-lg hover:bg-white/30 backdrop-blur-sm transition uppercase tracking-wider">Reset</button>
+                        </div>
+                         <div class="mt-8 flex items-center justify-center gap-4">
+                            <button id="toggle-sound-btn" class="w-16 h-16 rounded-full flex items-center justify-center transition ${soundOn ? 'bg-white/20' : 'bg-white/10'} hover:bg-white/30" title="Toggle focus sounds">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    ${soundOn ? `
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />` : `
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" clip-rule="evenodd" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2 2m2-2l2 2" />`}
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                 </div>`;
+            updateClock();
+        }
+
+        function startTimer() {
+            if (timerState === 'running') return;
+
+            // Only log a new session if it's a Pomodoro starting from a stopped state
+            if (timerMode === 'pomodoro' && timerState === 'stopped') {
+                logStudySession();
+            }
+            
+            timerState = 'running';
+
+            timerInterval = setInterval(() => {
+                timeLeft--;
+                renderTimerView();
+                if (timeLeft <= 0) {
+                    clearInterval(timerInterval);
+                    timerState = 'stopped';
+                    const sessionDuration = timerDurations[timerMode];
+                    if(timerMode === 'pomodoro') logStudyTime(sessionDuration);
+                    playFinishSound();
+                    
+                    if (timerMode === 'pomodoro') {
+                        const isLongBreak = (userStats.totalPomodoroSessions || 0) % 4 === 0;
+                        timerMode = isLongBreak ? 'long' : 'short';
+                    } else {
+                        timerMode = 'pomodoro';
+                    }
+                    
+                    // Reset the timer and immediately update the display to show the next session's duration
+                    resetTimer();
+
+                    if (userStats.timerAutoStart) {
+                        setTimeout(() => startTimer(), 1000);
+                    }
+                }
+            }, 1000);
+            renderTimerView();
+        }
+
+        function pauseTimer() {
+            timerState = 'paused';
+            clearInterval(timerInterval);
+            renderTimerView();
+        }
+        
+        function resetTimer(shouldRender = true) {
+             clearInterval(timerInterval);
+             timerState = 'stopped';
+             timeLeft = timerDurations[timerMode];
+             if (shouldRender) renderTimerView();
+        }
+
+        function exitTimerView() {
+            stopClock();
+            stopFocusSound();
+            document.body.style.backgroundImage = 'none';
+            document.body.classList.remove('timer-active-body');
+            // Unlock screen orientation
+            if (typeof screen.orientation?.unlock === 'function') {
+                screen.orientation.unlock();
+            }
+            switchTab('dashboard'); 
+        }
+        
+        function playFinishSound() {
+            playPreviewSound(userStats.timerSound, userStats.customTimerSoundURL);
+        }
+
+        function updateClock() {
+            const clockEl = document.getElementById('live-clock');
+            if (clockEl) clockEl.innerHTML = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit'});
+        }
+
+        function startClock() {
+            if (!clockInterval) {
+                updateClock();
+                clockInterval = setInterval(updateClock, 1000);
+            }
+        }
+
+        function stopClock() {
+            clearInterval(clockInterval);
+            clockInterval = null;
+        }
+
+        // --- Utility & Logging Functions ---
+        function logCardReview() {
+            const today = new Date().toISOString().split('T')[0];
+            let log = allStudyLogs.find(l => l.id === today);
+            if (!log) {
+                log = { id: today, cardsReviewed: 0, timeStudied: 0 };
+                allStudyLogs.push(log);
+            }
+            log.cardsReviewed = (log.cardsReviewed || 0) + 1;
+            userStats.totalCardsReviewed = (userStats.totalCardsReviewed || 0) + 1;
+            checkAndAwardAchievements();
+            saveStateToLocalStorage();
+        }
+
+        function logStudyTime(seconds) {
+            const today = new Date().toISOString().split('T')[0];
+            let log = allStudyLogs.find(l => l.id === today);
+             if (!log) {
+                 log = { id: today, cardsReviewed: 0, timeStudied: 0 };
+                 allStudyLogs.push(log);
+            }
+            log.timeStudied = (log.timeStudied || 0) + seconds;
+            saveStateToLocalStorage();
+        }
+
+        function logStudySession() {
+            const today = new Date().toISOString().split('T')[0];
+            const yesterday = new Date(new Date().setDate(new Date().getDate() - 1)).toISOString().split('T')[0];
+
+            if (userStats.lastStudyDay !== today) {
+                if (userStats.lastStudyDay === yesterday) {
+                    userStats.currentStreak = (userStats.currentStreak || 0) + 1;
+                } else {
+                    userStats.currentStreak = 1;
+                }
+            }
+            userStats.longestStreak = Math.max(userStats.longestStreak || 0, userStats.currentStreak);
+            userStats.totalPomodoroSessions = (userStats.totalPomodoroSessions || 0) + 1;
+            userStats.lastStudyDay = today;
+            checkAndAwardAchievements();
+            saveStateToLocalStorage();
+        }
+
+        function exportCurrentDeck(format) {
+            if (!currentDeckId || cards.length === 0) return;
+            const deckData = { deckName: currentDeckName, cards: cards.map(({ front, back }) => ({ front, back })) };
+            let fileContent, mimeType, fileName;
+            const sanitizedDeckName = currentDeckName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+
+            if (format === 'json') {
+                fileContent = JSON.stringify(deckData, null, 2);
+                mimeType = 'application/json';
+                fileName = `${sanitizedDeckName}.json`;
+            } else if (format === 'csv') {
+                let csv = 'front,back\n';
+                const escape = (field) => `"${String(field || '').replace(/"/g, '""')}"`;
+                deckData.cards.forEach(card => { csv += `${escape(card.front)},${escape(card.back)}\n`; });
+                fileContent = csv;
+                mimeType = 'text/csv';
+                fileName = `${sanitizedDeckName}.csv`;
+            } else return;
+
+            const blob = new Blob([fileContent], { type: mimeType });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = fileName;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        async function processDeckImport(fileContent, fileType) {
+            const feedbackEl = document.getElementById('import-feedback');
+            feedbackEl.textContent = 'Processing...';
+            feedbackEl.className = 'text-sm mt-2 text-center text-slate-400';
+            let deckName, importedCards;
+            try {
+                if (fileType === 'json') {
+                    const data = JSON.parse(fileContent);
+                    deckName = data.deckName;
+                    importedCards = data.cards;
+                } else if (fileType === 'csv') {
+                    importedCards = parseCsv(fileContent);
+                    const file = document.getElementById('deck-file-input').files[0];
+                    deckName = file.name.replace(/\.[^/.]+$/, "");
+                }
+                if (!deckName || !importedCards || importedCards.length === 0) throw new Error('Invalid file content.');
+                
+                const newDeck = {
+                    id: Date.now().toString(),
+                    name: deckName + " (Imported)",
+                    tags: ['imported'],
+                    cards: importedCards.map(card => ({
+                        front: card.front,
+                        back: card.back,
+                        id: Date.now().toString() + Math.random(),
+                        repetition: 0,
+                        easinessFactor: 2.5,
+                        interval: 0,
+                        nextReviewDate: new Date().toISOString()
+                    })),
+                    createdAt: new Date().toISOString()
+                };
+                allDecks.push(newDeck);
+                saveStateToLocalStorage();
+                renderDecksView();
+
+                feedbackEl.textContent = `Success! Imported ${importedCards.length} cards.`;
+                feedbackEl.className = 'text-sm mt-2 text-center text-green-400';
+            } catch (error) {
+                console.error("Import failed:", error);
+                feedbackEl.textContent = `Import failed: ${error.message}`;
+                feedbackEl.className = 'text-sm mt-2 text-center text-red-400';
+            } finally {
+                setTimeout(() => feedbackEl.textContent = '', 4000);
+            }
+        }
+
+        function parseCsv(csvString) {
+            const lines = csvString.trim().split('\n');
+            const headers = (lines.shift() || '').toLowerCase().split(',').map(h => h.trim().replace(/"/g, ''));
+            const frontIndex = headers.indexOf('front');
+            const backIndex = headers.indexOf('back');
+            if (frontIndex === -1 || backIndex === -1) throw new Error('CSV must have "front" and "back" headers.');
+            return lines.map(line => {
+                const values = line.match(/(".*?"|[^",\r]+)(?=\s*,|\s*$)/g) || [];
+                const unquote = (f) => f && f.startsWith('"') && f.endsWith('"') ? f.slice(1, -1).replace(/""/g, '"') : f;
+                return { front: unquote(values[frontIndex]), back: unquote(values[backIndex]) };
+            }).filter(c => c.front && c.back);
+        }
+
+        function highlightMatches(text, searchTerm) {
+            if (!searchTerm) return text;
+            const escapedTerm = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(`(${escapedTerm})`, 'gi');
+            return text.replace(regex, `<mark class="bg-indigo-500/40 text-slate-100 rounded-sm">$1</mark>`);
+        }
+
+        function readFileAsDataURL(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+        
+        function removeBackgroundImage() {
+            userStats.customBackgroundURL = null;
+            saveStateToLocalStorage();
+            document.body.style.backgroundImage = defaultBackground;
+        }
+
+        function handleCardFileInputChange(input) {
+            const file = input.files[0];
+            const key = input.dataset.key;
+            if (!file || !key) return;
+            newCardFiles[key] = file;
+            renderFlashcardView();
+        }
+
+        function clearNewCardFile(key) {
+            if (key === 'all') {
+                newCardFiles = { frontImage: null, frontAudio: null, backImage: null, backAudio: null };
+            } else {
+                newCardFiles[key] = null;
+            }
+            renderFlashcardView();
+        }
+        
+        // --- Gemini AI Features ---
+        const API_KEY = "GET YOUR API KEY FROM GOOGLE STUDIO"; // Add your API key
+        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${API_KEY}`;
+
+        async function callGemini(prompt, isJson = false) {
+            const payload = { contents: [{ parts: [{ text: prompt }] }] };
+            if (isJson) {
+                payload.generationConfig = {
+                    responseMimeType: "application/json",
+                    responseSchema: { type: "ARRAY", items: { type: "OBJECT", properties: { front: { type: "STRING" }, back: { type: "STRING" } } } }
+                };
+            }
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!response.ok) throw new Error(`API error: ${response.statusText}`);
+                const result = await response.json();
+                return result.candidates?.[0]?.content?.parts?.[0]?.text || null;
+            } catch (error) {
+                console.error('Error calling Gemini API:', error);
+                alert("Error with AI feature. Check your Gemini API key and network connection.");
+                return null;
+            }
+        }
+        
+        async function generateCardsWithAI() {
+            const btn = document.getElementById('generate-cards-btn');
+            if (!currentDeckName || !btn) return;
+            btn.disabled = true;
+            btn.innerHTML = `<span class="animate-pulse">Generating...</span>`;
+            const prompt = `Generate 5 flashcards for a student on "${currentDeckName}". Each card needs a 'front' and a 'back'.`;
+            const resultText = await callGemini(prompt, true);
+            if (resultText) {
+                try {
+                    const generatedCards = JSON.parse(resultText);
+                    const deck = allDecks.find(d => d.id === currentDeckId);
+                    if (deck) {
+                        generatedCards.forEach(card => {
+                            if (card.front && card.back) {
+                                deck.cards.push({ id: Date.now().toString() + Math.random(), ...card, repetition: 0, easinessFactor: 2.5, interval: 0, nextReviewDate: new Date().toISOString() });
+                            }
+                        });
+                        saveStateToLocalStorage();
+                        openDeck(); // Re-opens deck to refresh card view
+                    }
+                } catch (e) { console.error("Failed to parse AI response:", e); }
+            }
+            btn.disabled = false;
+            btn.innerHTML = '✨ Generate Sample Cards';
+        }
+        
+        async function summarizeNote() {
+            const textarea = document.getElementById('note-content-input');
+            if (!textarea || !textarea.value.trim()) return;
+            const btn = document.getElementById('summarize-note-btn');
+            btn.disabled = true;
+            btn.innerHTML = `...`;
+            const prompt = `Summarize these notes concisely:\n\n${textarea.value}`;
+            const summary = await callGemini(prompt);
+            if (summary) textarea.value = summary;
+            btn.disabled = false;
+            btn.innerHTML = '✨ Summarize';
+        }
+
+        async function expandNote() {
+            const textarea = document.getElementById('note-content-input');
+            if (!textarea || !textarea.value.trim()) return;
+            const btn = document.getElementById('expand-note-btn');
+            btn.disabled = true;
+            btn.innerHTML = `...`;
+            const prompt = `Elaborate on these notes with more detail:\n\n${textarea.value}`;
+            const expansion = await callGemini(prompt);
+            if (expansion) textarea.value += `\n\n---\n\n${expansion}`;
+            btn.disabled = false;
+            btn.innerHTML = '✨ Expand';
+        }
+
+        // --- Note Editor Toolbar & Export ---
+        function handleToolbarClick(action) {
+            const textarea = document.getElementById('note-content-input');
+            const start = textarea.selectionStart, end = textarea.selectionEnd;
+            const selected = textarea.value.substring(start, end);
+            let replacement = '';
+            switch (action) {
+                case 'bold': replacement = `**${selected}**`; break;
+                case 'italic': replacement = `*${selected}*`; break;
+                case 'h1': replacement = `# ${selected}`; break;
+                case 'h2': replacement = `## ${selected}`; break;
+                case 'code': replacement = "\n```\n" + selected + "\n```\n"; break;
+                case 'link': replacement = `[${selected || 'text'}](url)`; break;
+            }
+            textarea.setRangeText(replacement, start, end, 'end');
+            textarea.focus();
+        }
+
+        function exportNoteAsMarkdown() {
+            const title = document.getElementById('note-title-input').value.trim() || 'Untitled';
+            const content = document.getElementById('note-content-input').value;
+            const blob = new Blob([content], { type: 'text/markdown' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.md`;
+            link.click();
+        }
+
+        function exportNoteAsPdf() {
+            const title = document.getElementById('note-title-input').value.trim() || 'Untitled';
+            const content = document.getElementById('note-content-input').value;
+            const htmlContent = `<h1>${title}</h1>` + markdownConverter.makeHtml(content);
+            const doc = new jsPDF();
+            const tempContainer = document.createElement('div');
+            tempContainer.innerHTML = htmlContent;
+            tempContainer.style.width = '180mm';
+            doc.html(tempContainer, { callback: (doc) => { doc.save(`${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.pdf`); }, x: 15, y: 15, width: 180, windowWidth: 675 });
+        }
+
+
+        // --- Achievements Logic ---
+        const achievementsList = {
+            SESSIONS_1: { title: "First Step", icon: "🚀" },
+            SESSIONS_10: { title: "Focused Mind", icon: "🎯" },
+            CARDS_50: { title: "Card Collector", icon: "📚" },
+            DECKS_5: { title: "Deck Builder", icon: "🏗️" },
+            STREAK_3: { title: "On a Roll", icon: "🔥" },
+            STREAK_7: { title: "Week of Wisdom", icon: "🗓️" },
+        };
+
+        function renderAchievements() {
+            return `<div class="flex flex-wrap gap-4">${Object.entries(achievementsList).map(([id, ach]) => {
+                const isUnlocked = userStats.achievements?.[id];
+                return `<div class="achievement-badge text-center ${isUnlocked ? '' : 'locked'}" title="${ach.title}"><div class="text-4xl p-4 bg-slate-700/50 rounded-full mb-1">${ach.icon}</div><p class="text-xs font-medium">${ach.title}</p></div>`;
+            }).join('')}</div>`;
+        }
+        
+        function checkAndAwardAchievements() {
+            if (!userStats) return;
+            const newAchievements = { ...(userStats.achievements || {}) };
+            let changed = false;
+            if (userStats.totalPomodoroSessions >= 1 && !newAchievements.SESSIONS_1) { newAchievements.SESSIONS_1 = true; changed = true; }
+            if (userStats.totalPomodoroSessions >= 10 && !newAchievements.SESSIONS_10) { newAchievements.SESSIONS_10 = true; changed = true; }
+            if (userStats.totalCardsReviewed >= 50 && !newAchievements.CARDS_50) { newAchievements.CARDS_50 = true; changed = true; }
+            if (allDecks.length >= 5 && !newAchievements.DECKS_5) { newAchievements.DECKS_5 = true; changed = true; }
+            if (userStats.currentStreak >= 3 && !newAchievements.STREAK_3) { newAchievements.STREAK_3 = true; changed = true; }
+            if (userStats.currentStreak >= 7 && !newAchievements.STREAK_7) { newAchievements.STREAK_7 = true; changed = true; }
+            if (changed) { userStats.achievements = newAchievements; saveStateToLocalStorage(); }
+        }
+
+        // --- Timer Settings Modal Logic ---
+        function openTimerSettingsModal() {
+            document.getElementById('settings-pomodoro-duration').value = userStats.customPomodoroDuration;
+            document.getElementById('settings-short-break-duration').value = userStats.customShortBreakDuration;
+            document.getElementById('settings-long-break-duration').value = userStats.customLongBreakDuration;
+            document.getElementById('auto-start-toggle').checked = userStats.timerAutoStart;
+            document.getElementById('custom-sound-name').textContent = userStats.customTimerSoundName || 'None';
+            
+            const customSoundBtn = document.querySelector('.sound-option-btn[data-sound="custom"]');
+            customSoundBtn.disabled = !userStats.customTimerSoundURL;
+            customSoundBtn.classList.toggle('opacity-50', !userStats.customTimerSoundURL);
+            
+            document.querySelectorAll('.sound-option-btn').forEach(btn => {
+                btn.classList.toggle('bg-indigo-600', btn.dataset.sound === userStats.timerSound);
+            });
+            timerSettingsModal.classList.remove('hidden');
+        }
+
+        function closeTimerSettingsModal() {
+            timerSettingsModal.classList.add('hidden');
+            if (previewAudio) previewAudio.pause();
+            if (previewAudioContext) previewAudioContext.close();
+        }
+
+        function saveTimerSettings() {
+            userStats.customPomodoroDuration = parseInt(document.getElementById('settings-pomodoro-duration').value, 10);
+            userStats.customShortBreakDuration = parseInt(document.getElementById('settings-short-break-duration').value, 10);
+            userStats.customLongBreakDuration = parseInt(document.getElementById('settings-long-break-duration').value, 10);
+            userStats.timerAutoStart = document.getElementById('auto-start-toggle').checked;
+            const selectedSoundBtn = document.querySelector('.sound-option-btn.bg-indigo-600');
+            userStats.timerSound = selectedSoundBtn ? selectedSoundBtn.dataset.sound : 'default';
+            saveStateToLocalStorage();
+            updateTimerDurationsFromStats();
+            resetTimer();
+        }
+        
+        function updateTimerDurationsFromStats() {
+            timerDurations = {
+                pomodoro: (userStats.customPomodoroDuration || 25) * 60,
+                short: (userStats.customShortBreakDuration || 5) * 60,
+                long: (userStats.customLongBreakDuration || 15) * 60,
+            };
+        }
+        
+        function playPreviewSound(soundType, customUrl = null) {
+            // Clean up previous audio instances
+            if (previewAudio) {
+                previewAudio.pause();
+                previewAudio = null;
+            }
+            if (previewAudioContext) {
+                previewAudioContext.close();
+                previewAudioContext = null;
+            }
+
+            // Handle custom uploaded audio file
+            if (soundType === 'custom' && customUrl) {
+                previewAudio = new Audio(customUrl);
+                previewAudio.play();
+                return;
+            }
+
+            // Handle generated audio types
+            try {
+                const tempAudioContext = new(window.AudioContext || window.webkitAudioContext)();
+                previewAudioContext = tempAudioContext; // Store reference to close later
+
+                let sourceToPlay;
+                let extraNodes = [];
+                const gainNode = tempAudioContext.createGain();
+                gainNode.connect(tempAudioContext.destination);
+
+                switch (soundType) {
+                    case 'default':
+                        sourceToPlay = tempAudioContext.createOscillator();
+                        sourceToPlay.type = 'sine';
+                        sourceToPlay.frequency.setValueAtTime(440, tempAudioContext.currentTime);
+                        gainNode.gain.setValueAtTime(0.1, tempAudioContext.currentTime);
+                        sourceToPlay.connect(gainNode);
+                        break;
+                    case 'noise':
+                        const bufferSize = tempAudioContext.sampleRate; // 1 second buffer
+                        const noiseBuffer = tempAudioContext.createBuffer(1, bufferSize, tempAudioContext.sampleRate);
+                        const output = noiseBuffer.getChannelData(0);
+                        for (let i = 0; i < bufferSize; i++) {
+                            output[i] = Math.random() * 2 - 1;
+                        }
+                        sourceToPlay = tempAudioContext.createBufferSource();
+                        sourceToPlay.buffer = noiseBuffer;
+                        sourceToPlay.loop = true;
+                        gainNode.gain.setValueAtTime(0.05, tempAudioContext.currentTime);
+                        sourceToPlay.connect(gainNode);
+                        break;
+                    case 'rain':
+                        const rainBufferSize = tempAudioContext.sampleRate * 2;
+                        const rainNoiseBuffer = tempAudioContext.createBuffer(1, rainBufferSize, tempAudioContext.sampleRate);
+                        const rainOutput = rainNoiseBuffer.getChannelData(0);
+                        for (let i = 0; i < rainBufferSize; i++) {
+                            rainOutput[i] = Math.random() * 2 - 1;
+                        }
+                        sourceToPlay = tempAudioContext.createBufferSource();
+                        sourceToPlay.buffer = rainNoiseBuffer;
+                        sourceToPlay.loop = true;
+                        const b_filter = tempAudioContext.createBiquadFilter();
+                        b_filter.type = "bandpass";
+                        b_filter.frequency.value = 800;
+                        b_filter.Q.value = 0.5;
+                        gainNode.gain.setValueAtTime(0.1, tempAudioContext.currentTime);
+                        sourceToPlay.connect(b_filter);
+                        b_filter.connect(gainNode);
+                        break;
+                    case 'cafe':
+                        sourceToPlay = tempAudioContext.createOscillator();
+                        sourceToPlay.type = 'sawtooth';
+                        sourceToPlay.frequency.value = 55;
+                        const lfo = tempAudioContext.createOscillator();
+                        lfo.type = 'square';
+                        lfo.frequency.value = 1;
+                        const lfoGain = tempAudioContext.createGain();
+                        lfoGain.gain.value = 0.2;
+                        lfo.connect(lfoGain);
+                        lfoGain.connect(gainNode.gain);
+                        gainNode.gain.setValueAtTime(0, tempAudioContext.currentTime);
+                        gainNode.gain.linearRampToValueAtTime(0.05, tempAudioContext.currentTime + 0.1);
+                        sourceToPlay.connect(gainNode);
+                        extraNodes.push(lfo);
+                        break;
+                }
+
+                if (sourceToPlay) {
+                    sourceToPlay.start(0);
+                    extraNodes.forEach(node => node.start(0));
+
+                    setTimeout(() => {
+                        try {
+                            sourceToPlay.stop(0);
+                            extraNodes.forEach(node => node.stop(0));
+                        } catch (e) { /* already stopped */ }
+                        
+                        tempAudioContext.close().then(() => {
+                            if (previewAudioContext === tempAudioContext) {
+                                previewAudioContext = null;
+                            }
+                        });
+                    }, 1000); // Preview for 1 second
+                } else {
+                    tempAudioContext.close(); // Close if no sound was created
+                    previewAudioContext = null;
+                }
+            } catch (e) {
+                console.error("Could not play preview sound:", e);
+                if (previewAudioContext) {
+                    previewAudioContext.close();
+                    previewAudioContext = null;
+                }
+            }
+        }
+
+        // --- Spaced Repetition Logic (SM-2 Algorithm) ---
+        function handleCardReview(quality) {
+            if (reviewCards.length === 0) return;
+            const card = reviewCards[0];
+            const deck = allDecks.find(d => d.id === currentDeckId);
+            const cardInDeck = deck?.cards.find(c => c.id === card.id);
+            if (!cardInDeck) return;
+
+            updateCardSRS(cardInDeck, quality);
+            logCardReview();
+            saveStateToLocalStorage();
+            filterReviewCards();
+            render();
+        }
+
+        function updateCardSRS(card, quality) {
+            // SM-2 algorithm implementation
+            if (quality < 0 || quality > 5) return;
+
+            // 1. Update Easiness Factor (EF)
+            let ef = card.easinessFactor || 2.5;
+            ef = ef + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
+            if (ef < 1.3) ef = 1.3;
+            card.easinessFactor = ef;
+
+            // 2. Update repetitions and interval
+            if (quality < 3) {
+                // Incorrect response
+                card.repetition = 0;
+                card.interval = 1;
+            } else {
+                // Correct response
+                card.repetition = (card.repetition || 0) + 1;
+                if (card.repetition === 1) {
+                    card.interval = 1;
+                } else if (card.repetition === 2) {
+                    card.interval = 6;
+                } else {
+                    card.interval = Math.ceil((card.interval || 6) * ef);
+                }
+            }
+
+            // 3. Set next review date
+            const newReviewDate = new Date();
+            newReviewDate.setDate(newReviewDate.getDate() + card.interval);
+            card.nextReviewDate = newReviewDate.toISOString();
+        }
+        
+        // --- Quiz Logic ---
+        function renderQuizView() {
+            let html = `<h2 class="text-2xl font-bold mb-4 text-white">Start a Quiz</h2>`;
+            if (allDecks.length === 0) {
+                 html += `<p class="text-slate-400">You need to create a deck with at least 4 cards to start a quiz.</p>`;
+            } else {
+                 html += '<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">';
+                allDecks.forEach(deck => {
+                    const canQuiz = deck.cards && deck.cards.length >= 4;
+                    html += `
+                        <div class="bg-slate-800/60 p-6 rounded-lg flex flex-col justify-between">
+                            <div>
+                                <h3 class="text-lg font-semibold text-slate-200 mb-2">${deck.name}</h3>
+                                <p class="text-sm text-slate-400">${deck.cards?.length || 0} cards</p>
+                            </div>
+                            <button data-id="${deck.id}" class="start-quiz-btn w-full mt-4 px-6 py-2 bg-indigo-600 text-white font-medium rounded-lg shadow-sm hover:bg-indigo-700 disabled:bg-slate-600 disabled:cursor-not-allowed" ${!canQuiz ? 'disabled' : ''}>
+                                ${canQuiz ? 'Start Quiz' : 'Needs 4+ cards'}
+                            </button>
+                        </div>`;
+                });
+                html += '</div>';
+            }
+            views.quiz.innerHTML = html;
+        }
+
+        function startQuiz(deckId) {
+            const deck = allDecks.find(d => d.id === deckId);
+            if (!deck || !deck.cards || deck.cards.length < 4) return;
+            
+            const shuffledCards = [...deck.cards].sort(() => 0.5 - Math.random());
+            const questions = shuffledCards.slice(0, 10).map(correctCard => {
+                const distractors = shuffledCards
+                    .filter(c => c.id !== correctCard.id)
+                    .slice(0, 3)
+                    .map(c => c.back);
+                const options = [correctCard.back, ...distractors].sort(() => 0.5 - Math.random());
+                return {
+                    question: correctCard.front,
+                    options: options,
+                    answer: correctCard.back
+                };
+            });
+
+            currentQuizState = {
+                isActive: true,
+                deckId: deckId,
+                questions: questions,
+                currentQuestionIndex: 0,
+                score: 0
+            };
+            render();
+        }
+
+        function endQuiz() {
+            currentQuizState.isActive = false;
+            render();
+        }
+
+        function renderQuizSessionView() {
+            if (!currentQuizState.isActive) return;
+
+            const questionNumber = currentQuizState.currentQuestionIndex + 1;
+            const totalQuestions = currentQuizState.questions.length;
+            const progress = (questionNumber / totalQuestions) * 100;
+
+            if (currentQuizState.currentQuestionIndex >= totalQuestions) {
+                // Quiz finished, show results
+                views.quizSession.innerHTML = `
+                     <div class="text-center">
+                         <h2 class="text-3xl font-bold text-white mb-4">Quiz Complete!</h2>
+                         <p class="text-5xl font-bold text-emerald-400 mb-6">${currentQuizState.score} / ${totalQuestions}</p>
+                         <button id="back-to-quiz-selection-btn" class="px-6 py-2 bg-indigo-600 text-white font-medium rounded-lg shadow-sm hover:bg-indigo-700">Back to Quiz Selection</button>
+                     </div>`;
+            } else {
+                // Show current question
+                const currentQuestion = currentQuizState.questions[currentQuizState.currentQuestionIndex];
+                views.quizSession.innerHTML = `
+                    <div>
+                        <div class="mb-4">
+                            <div class="flex justify-between items-center text-slate-300 mb-2">
+                                <span>Question ${questionNumber} of ${totalQuestions}</span>
+                                <span>Score: ${currentQuizState.score}</span>
+                            </div>
+                            <div class="w-full bg-slate-700 rounded-full h-2.5"><div class="bg-indigo-500 h-2.5 rounded-full" style="width: ${progress}%"></div></div>
+                        </div>
+                        <div class="bg-slate-800/60 p-8 rounded-lg text-center">
+                            <p class="text-2xl font-semibold text-slate-100 mb-8">${currentQuestion.question}</p>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                ${currentQuestion.options.map(option => `
+                                    <button class="quiz-option block w-full text-left p-4 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors">
+                                        ${option}
+                                    </button>
+                                `).join('')}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+        
+        function handleQuizAnswer(selectedButton) {
+            const selectedAnswer = selectedButton.textContent.trim();
+            const currentQuestion = currentQuizState.questions[currentQuizState.currentQuestionIndex];
+            const isCorrect = selectedAnswer === currentQuestion.answer;
+
+            if (isCorrect) {
+                currentQuizState.score++;
+                selectedButton.classList.add('correct');
+            } else {
+                selectedButton.classList.add('incorrect');
+                // Highlight the correct answer
+                document.querySelectorAll('.quiz-option').forEach(btn => {
+                    if (btn.textContent.trim() === currentQuestion.answer) {
+                        btn.classList.add('correct');
+                    }
+                });
+            }
+
+            document.querySelectorAll('.quiz-option').forEach(btn => btn.disabled = true);
+
+            setTimeout(() => {
+                currentQuizState.currentQuestionIndex++;
+                render();
+            }, 1500);
+        }
+
+        // --- Start App ---
+        initialize();
+    </script>
+</body>
+</html>
+
+
